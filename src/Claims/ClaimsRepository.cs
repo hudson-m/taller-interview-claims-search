@@ -8,20 +8,36 @@ public class ClaimsRepository
 
     public ClaimsRepository(SqliteConnection db) => _db = db;
 
+    // MYT-3108: only these fixed SQL fragments can reach ORDER BY; user input is used as a lookup key, never as SQL text.
+    private static readonly IReadOnlyDictionary<string, string> SortColumns = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["date"] = "submitted_at",
+        ["amount"] = "amount",
+        ["status"] = "status",
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> SortDirections = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["asc"] = "ASC",
+        ["desc"] = "DESC",
+    };
+
     // Search the claims of one member. Called by the claims page of the member website and by the support tool.
     public IReadOnlyList<Claim> Search(int memberId, string? text, string? sortBy = "date", string? sortDir = "desc", int page = 0)
     {
-        // MYT-3108: the search text is now a parameter. Sort input is sanitized.
+        // MYT-3108: the search text is now a parameter. Sort/direction come from allow-lists.
         text = (text ?? "").Replace("'", "");                          // defense in depth
-        sortBy = (sortBy ?? "date").Replace("'", "").Replace(";", "");
-        var column = sortBy == "date" ? "submitted_at" : sortBy;
-        var direction = sortDir?.ToLowerInvariant() == "asc" ? "ASC" : "DESC";
+        var column = SortColumns.TryGetValue(sortBy ?? "", out var col)
+            ? col : throw new ArgumentException("sortBy must be 'date', 'amount' or 'status'.", nameof(sortBy));
+        var direction = SortDirections.TryGetValue(sortDir ?? "", out var dir)
+            ? dir : throw new ArgumentException("sortDir must be 'asc' or 'desc'.", nameof(sortDir));
+        if (page < 0) throw new ArgumentOutOfRangeException(nameof(page), "page must be 0 or greater.");
 
         using var cmd = _db.CreateCommand();
         cmd.CommandText =
             "SELECT id, provider, description, amount, status, submitted_at FROM claims " +
             "WHERE member_id = @member AND (description LIKE @text OR provider LIKE @text) " +
-            $"ORDER BY {column} {direction} LIMIT 20 OFFSET @offset";
+            $"ORDER BY {column} {direction}, id ASC LIMIT 20 OFFSET @offset";
         cmd.Parameters.AddWithValue("@member", memberId);
         cmd.Parameters.AddWithValue("@text", text);
         cmd.Parameters.AddWithValue("@offset", page * 20);
