@@ -110,50 +110,48 @@ public class MyTests
 
     // ---------- Sad path / injection: sorting ----------
 
-    [Theory]
-    [InlineData("id")]
-    [InlineData("member_id")]
-    [InlineData("provider")]
-    [InlineData("submitted_at")]
-    [InlineData("amount; DROP TABLE claims")]
-    [InlineData("amount;DROP TABLE claims")]
-    [InlineData("amount, (SELECT name FROM members)")]
-    [InlineData("(SELECT 1)")]
-    [InlineData("CASE WHEN (SELECT 1)=1 THEN amount ELSE status END")]
-    [InlineData("amount--")]
-    [InlineData("date ")]
-    [InlineData(" date")]
-    [InlineData("Date")]
-    [InlineData("AMOUNT")]
-    [InlineData("")]
-    [InlineData(null)]
-    public void Search_InvalidSortBy_ThrowsArgumentException_AndTableIsIntact(string? sortBy)
+    // Payload lists use Assert.All instead of [Theory] rows: every failing payload is still named in the
+    // failure message, but there is one failing entry per test. (check/Program.cs reads stdout before stderr,
+    // and dozens of [FAIL] lines on stderr deadlock it when these tests run on the agent's version.)
+    private static readonly string?[] InvalidSortBy =
     {
-        var db = Db.CreateSeeded();
-        var repo = new ClaimsRepository(db);
+        "id", "member_id", "provider", "submitted_at",
+        "amount; DROP TABLE claims", "amount;DROP TABLE claims", "amount, (SELECT name FROM members)",
+        "(SELECT 1)", "CASE WHEN (SELECT 1)=1 THEN amount ELSE status END", "amount--",
+        "date ", " date", "Date", "AMOUNT", "", null,
+    };
 
-        Assert.Throws<ArgumentException>(() => repo.Search(1, "City Pharmacy", sortBy, "asc"));
-        Assert.True(ClaimsTableExists(db));
-        Assert.Equal(6, ClaimsRowCount(db));
+    private static readonly string?[] InvalidSortDir =
+    {
+        "ASC", "Desc", "asc ", "ascending", "asc; DROP TABLE claims", "asc, (SELECT name FROM members)", "", null,
+    };
+
+    [Fact]
+    public void Search_InvalidSortBy_ThrowsArgumentException_AndTableIsIntact()
+    {
+        Assert.All(InvalidSortBy, sortBy =>
+        {
+            var db = Db.CreateSeeded();
+            var repo = new ClaimsRepository(db);
+
+            Assert.Throws<ArgumentException>(() => repo.Search(1, "City Pharmacy", sortBy, "asc"));
+            Assert.True(ClaimsTableExists(db));
+            Assert.Equal(6, ClaimsRowCount(db));
+        });
     }
 
-    [Theory]
-    [InlineData("ASC")]
-    [InlineData("Desc")]
-    [InlineData("asc ")]
-    [InlineData("ascending")]
-    [InlineData("asc; DROP TABLE claims")]
-    [InlineData("asc, (SELECT name FROM members)")]
-    [InlineData("")]
-    [InlineData(null)]
-    public void Search_InvalidSortDir_ThrowsArgumentException_AndTableIsIntact(string? sortDir)
+    [Fact]
+    public void Search_InvalidSortDir_ThrowsArgumentException_AndTableIsIntact()
     {
-        var db = Db.CreateSeeded();
-        var repo = new ClaimsRepository(db);
+        Assert.All(InvalidSortDir, sortDir =>
+        {
+            var db = Db.CreateSeeded();
+            var repo = new ClaimsRepository(db);
 
-        Assert.Throws<ArgumentException>(() => repo.Search(1, "City Pharmacy", "amount", sortDir));
-        Assert.True(ClaimsTableExists(db));
-        Assert.Equal(6, ClaimsRowCount(db));
+            Assert.Throws<ArgumentException>(() => repo.Search(1, "City Pharmacy", "amount", sortDir));
+            Assert.True(ClaimsTableExists(db));
+            Assert.Equal(6, ClaimsRowCount(db));
+        });
     }
 
     // ---------- Sad path / injection: search text ----------
@@ -177,17 +175,21 @@ public class MyTests
         Assert.Equal(6, ClaimsRowCount(db));
     }
 
-    [Theory]
-    [InlineData("%", new long[] { 104 })]       // only "Copay 100% covered" really contains %
-    [InlineData("100%", new long[] { 104 })]    // not "Copay 100 dollars"
-    [InlineData("_", new long[0])]              // no claim contains an underscore
-    [InlineData("C_ty", new long[0])]           // _ is not a single-character wildcard
-    [InlineData("%%", new long[0])]
-    [InlineData("\\", new long[0])]
-    [InlineData("Copay%", new long[0])]
-    public void Search_WildcardCharacters_AreLiteral(string text, long[] expected)
+    [Fact]
+    public void Search_WildcardCharacters_AreLiteral()
     {
-        Assert.Equal(expected, Ids(Repo().Search(1, text)));
+        var cases = new (string Text, long[] Expected)[]
+        {
+            ("%", new long[] { 104 }),      // only "Copay 100% covered" really contains %
+            ("100%", new long[] { 104 }),   // not "Copay 100 dollars"
+            ("_", new long[0]),             // no claim contains an underscore
+            ("C_ty", new long[0]),          // _ is not a single-character wildcard
+            ("%%", new long[0]),
+            ("\\", new long[0]),
+            ("Copay%", new long[0]),
+        };
+
+        Assert.All(cases, c => Assert.Equal(c.Expected, Ids(Repo().Search(1, c.Text))));
     }
 
     // ---------- Isolation ----------
